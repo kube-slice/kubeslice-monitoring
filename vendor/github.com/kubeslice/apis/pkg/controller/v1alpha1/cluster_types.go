@@ -1,17 +1,17 @@
 /*
- *  Copyright (c) 2022 Avesha, Inc. All rights reserved. # # SPDX-License-Identifier: Apache-2.0
+ * 	Copyright (c) 2022 Avesha, Inc. All rights reserved. # # SPDX-License-Identifier: Apache-2.0
  *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
+ * 	Licensed under the Apache License, Version 2.0 (the "License");
+ * 	you may not use this file except in compliance with the License.
+ * 	You may obtain a copy of the License at
  *
- *  http://www.apache.org/licenses/LICENSE-2.0
+ * 	http://www.apache.org/licenses/LICENSE-2.0
  *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * 	Unless required by applicable law or agreed to in writing, software
+ * 	distributed under the License is distributed on an "AS IS" BASIS,
+ * 	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * 	See the License for the specific language governing permissions and
+ * 	limitations under the License.
  */
 
 package v1alpha1
@@ -35,15 +35,31 @@ const (
 	ClusterHealthStatusWarning = "Warning"
 )
 
+type RegistrationStatus string
+
+const (
+	RegistrationStatusPending              = "Pending"
+	RegistrationStatusInProgress           = "InProgress"
+	RegistrationStatusFailed               = "Failed"
+	RegistrationStatusRegistered           = "Registered"
+	RegistrationStatusDeregisterInProgress = "DeregisterInProgress"
+	RegistrationStatusDeregisterFailed     = "DeregisterFailed"
+	RegistrationStatusDeregistered         = "Deregistered"
+)
+
 // ClusterSpec defines the desired state of Cluster
 type ClusterSpec struct {
-	//NodeIP is the IP address of the Node
+	//NodeIP is the IP address of the Node - deprecated field use Plural NodeIPs
+	//+kubebuilder:deprecatedversion:warning="controller/v1alpha1 NodeIP is deprecated...use NodeIPs"
 	NodeIP  string   `json:"nodeIP,omitempty"`
 	NodeIPs []string `json:"nodeIPs,omitempty"`
 	// NetworkInterface is the network interface attached with the cluster.
 	NetworkInterface string `json:"networkInterface,omitempty"`
 	//put in an object
 	ClusterProperty ClusterProperty `json:"clusterProperty,omitempty"`
+	// EnableAutoEviction is a flag to enable auto eviction feature for the given cluster
+	EnableAutoEviction bool `json:"enableAutoEviction,omitempty"`
+	RequeueOnFailure   bool `json:"requeueOnFailure,omitempty"`
 }
 
 type ClusterProperty struct {
@@ -79,6 +95,8 @@ type GeoLocation struct {
 
 // Monitoring defines the field of ClusterSpec
 type Monitoring struct {
+	// GrafanaDashboardBaseURL is the base URL for the grafana dashboard
+	GrafanaDashboardBaseURL string `json:"grafanaDashboardBaseURL,omitempty"`
 	//KubernetesDashboard contains the information regarding Kubernetes Monitoring Dashboard
 	KubernetesDashboard KubernetesDashboard `json:"kubernetesDashboard,omitempty"`
 }
@@ -105,6 +123,26 @@ type ClusterStatus struct {
 	Namespaces []NamespacesConfig `json:"namespaces,omitempty"`
 	// ClusterHealth shows the health of the worker cluster
 	ClusterHealth *ClusterHealth `json:"clusterHealth,omitempty"`
+	// NodeIPs of the gateway node of worker cluster
+	NodeIPs []string `json:"nodeIPs,omitempty"`
+	// RegistrationStatus shows the status of cluster registration
+	//+kubebuilder:validation:Enum:=Pending;InProgress;Failed;Registered;DeregisterInProgress;DeregisterFailed;Deregistered
+	RegistrationStatus RegistrationStatus `json:"registrationStatus,omitempty"`
+	// IsDeregisterInProgress is the flag to check if the cluster deregister is InProgress
+	IsDeregisterInProgress bool `json:"isDeregisterInProgress,omitempty"`
+	// NetworkPresent denotes if the networking components (NSM, Spire) are installed on a cluster
+	//+kubebuilder:default:=false
+	NetworkPresent bool `json:"networkPresent,omitempty"`
+
+	// VCPURestriction is the restriction on the cluster disabling the creation of new pods
+	VCPURestriction *VCPURestriction `json:"vCPURestriction,omitempty"`
+}
+
+type VCPURestriction struct {
+	// EnforceRestrictions is the flag to check if the cluster is restricted
+	EnforceRestrictions bool `json:"enforceRestrictions,omitempty"`
+	// LastUpdatedTimestamp is the timestamp when the enforcement was updated
+	LastUpdatedTimestamp metav1.Time `json:"lastUpdatedTimestamp,omitempty"`
 }
 
 type ClusterHealth struct {

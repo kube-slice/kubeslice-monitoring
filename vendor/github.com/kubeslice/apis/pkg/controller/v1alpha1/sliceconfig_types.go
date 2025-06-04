@@ -23,13 +23,38 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// +kubebuilder:validation:Enum:=single-network;multi-network;no-network
+type NetworkType string
+
+const (
+	// all workloads would be connected to the slice l3 overlay network
+	SINGLENET NetworkType = "single-network"
+
+	// workloads would be connected at l7 through network of envoy gateways.
+	// And the gateways would be connected through slice l3 overlay
+	MULTINET NetworkType = "multi-network"
+
+	// slice without any connectivity between clusters
+	NONET NetworkType = "no-network"
+)
+
+// +kubebuilder:validation:Enum:=none;istio;envoy
+type GatewayType string
+
+const (
+	GATEWAY_TYPE_NONE  GatewayType = "none"
+	GATEWAY_TYPE_ISTIO GatewayType = "istio"
+	GATEWAY_TYPE_ENVOY GatewayType = "envoy"
+)
+
 // SliceConfigSpec defines the desired state of SliceConfig
 type SliceConfigSpec struct {
-	SliceSubnet string `json:"sliceSubnet,omitempty"`
+	//+kubebuilder:default:=single-network
+	OverlayNetworkDeploymentMode NetworkType `json:"overlayNetworkDeploymentMode,omitempty"`
+	SliceSubnet                  string      `json:"sliceSubnet,omitempty"`
 	//+kubebuilder:default:=Application
-	SliceType string `json:"sliceType,omitempty"`
-	// +kubebuilder:validation:Required
-	SliceGatewayProvider WorkerSliceGatewayProvider `json:"sliceGatewayProvider"`
+	SliceType            string                      `json:"sliceType,omitempty"`
+	SliceGatewayProvider *WorkerSliceGatewayProvider `json:"sliceGatewayProvider,omitempty"`
 	//+kubebuilder:default:=Local
 	SliceIpamType          string   `json:"sliceIpamType,omitempty"`
 	Clusters               []string `json:"clusters,omitempty"`
@@ -38,20 +63,32 @@ type SliceConfigSpec struct {
 	QosProfileDetails         *QOSProfile               `json:"qosProfileDetails,omitempty"` // FIXME: Add OneOf StandardQosProfileName vs QosProfileDetails
 	NamespaceIsolationProfile NamespaceIsolationProfile `json:"namespaceIsolationProfile,omitempty"`
 	ExternalGatewayConfig     []ExternalGatewayConfig   `json:"externalGatewayConfig,omitempty"`
-	//+kubebuilder:default:=16
 	//+kubebuilder:validation:Minimum=2
 	//+kubebuilder:validation:Maximum=32
+	//+kubebuilder:default:=16
 	MaxClusters int `json:"maxClusters"`
+	//+kubebuilder:validation:Minimum=30
+	//+kubebuilder:validation:Maximum=90
+	//+kubebuilder:default:=30
+	RotationInterval int `json:"rotationInterval,omitempty"`
+	// RenewBefore is used for renew now!
+	RenewBefore *metav1.Time      `json:"renewBefore,omitempty"`
+	VPNConfig   *VPNConfiguration `json:"vpnConfig,omitempty"`
 }
 
 // ExternalGatewayConfig is the configuration for external gateways like 'istio', etc/
 type ExternalGatewayConfig struct {
-	Ingress   ExternalGatewayConfigOptions `json:"ingress,omitempty"`
-	Egress    ExternalGatewayConfigOptions `json:"egress,omitempty"`
-	NsIngress ExternalGatewayConfigOptions `json:"nsIngress,omitempty"`
-	//+kubebuilder:validation:Enum:=none;istio
-	GatewayType string   `json:"gatewayType,omitempty"`
-	Clusters    []string `json:"clusters,omitempty"`
+	Ingress          ExternalGatewayConfigOptions `json:"ingress,omitempty"`
+	Egress           ExternalGatewayConfigOptions `json:"egress,omitempty"`
+	NsIngress        ExternalGatewayConfigOptions `json:"nsIngress,omitempty"`
+	GatewayType      GatewayType                  `json:"gatewayType,omitempty"`
+	Clusters         []string                     `json:"clusters,omitempty"`
+	VPCServiceAccess ServiceAccess                `json:"vpcServiceAccess,omitempty"`
+}
+
+type ServiceAccess struct {
+	Ingress ExternalGatewayConfigOptions `json:"ingress,omitempty"`
+	Egress  ExternalGatewayConfigOptions `json:"egress,omitempty"`
 }
 
 type ExternalGatewayConfigOptions struct {
@@ -67,6 +104,21 @@ type WorkerSliceGatewayProvider struct {
 	//+kubebuilder:default:=Local
 	// +kubebuilder:validation:Required
 	SliceCaType string `json:"sliceCaType"`
+
+	SliceGatewayServiceType []SliceGatewayServiceType `json:"sliceGatewayServiceType,omitempty"`
+}
+
+type SliceGatewayServiceType struct {
+	// +kubebuilder:validation:Required
+	Cluster string `json:"cluster"`
+	// +kubebuilder:validation:Required
+	//+kubebuilder:default:=NodePort
+	//+kubebuilder:validation:Enum:=NodePort;LoadBalancer
+	Type string `json:"type"`
+	// +kubebuilder:validation:Required
+	//+kubebuilder:default:=UDP
+	//+kubebuilder:validation:Enum:=TCP;UDP
+	Protocol string `json:"protocol"`
 }
 
 // QOSProfile is the QOS Profile configuration from backend
@@ -106,8 +158,37 @@ type SliceNamespaceSelection struct {
 	Clusters  []string `json:"clusters,omitempty"`
 }
 
+// VPNConfiguration defines the additional (optional) VPN Configuration to customise
+type VPNConfiguration struct {
+	//+kubebuilder:default:=AES-256-CBC
+	//+kubebuilder:validation:Required
+	//+kubebuilder:validation:Enum:=AES-256-CBC;AES-128-CBC
+	Cipher string `json:"cipher"`
+}
+
+type KubesliceEvent struct {
+	// Type of the event. Can be one of Error, Success or InProgress
+	Type string `json:"type,omitempty"`
+	// Trigger action. Examples - CLUSTER_OFFBOARDING, NAMESPCE_OFFBOARDING etc
+	Action string `json:"action,omitempty"`
+	// list of effected components on which action failed
+	Components []string `json:"components,omitempty"`
+	// Identifier of the component for which the action was triggered
+	Identifier string `json:"identifier,omitempty"`
+	// Reason message for the event
+	Reason string `json:"reason,omitempty"`
+	// Event name (from monitoring framework schema)
+	Event string `json:"event"`
+	// Timestamp of the event
+	Timestamp metav1.Time `json:"timestamp,omitempty"`
+	// Flag to determine if kubernetes event is already raised
+	//+kubebuilder:default:=false
+	IsEventRaised bool `json:"isEventRaised,omitempty"`
+}
+
 // SliceConfigStatus defines the observed state of SliceConfig
 type SliceConfigStatus struct {
+	KubesliceEvents []KubesliceEvent `json:"kubesliceEvents,omitempty"`
 }
 
 //+kubebuilder:object:root=true
